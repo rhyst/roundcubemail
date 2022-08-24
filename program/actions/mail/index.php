@@ -499,6 +499,55 @@ class rcmail_action_mail_index extends rcmail_action
 
         $sort_col = $_SESSION['sort_col'];
 
+        // CONVERSATION VIEW
+        // A hacked up conversation view 
+        // Reorders the messages so threads are in reverse chronological order
+        // And swaps the parent_uids so the parent is the most recent message
+        // in the thread.
+        if ($rcmail->storage->get_threading()) {
+            function findIndex($array, $func) {
+                $index = 0;
+                foreach ($array as $item) {
+                    if (call_user_func($func, $item)) {
+                        return $index;
+                    }
+                    $index++;
+                }
+            }
+            $sorted_by_thread = [];
+            foreach ($a_headers as $header) {
+                if (!empty($header->parent_uid)) {
+                    $parent_index = findIndex($sorted_by_thread, function ($item) use ($header) { return $item->uid == $header->parent_uid; } );
+                    $parent = $sorted_by_thread[$parent_index];
+                    if (!empty($parent->parent_uid)) {
+                        $parent_index = findIndex($sorted_by_thread, function ($item) use ($parent) { return $item->uid == $parent->parent_uid; } );
+                        $parent = $sorted_by_thread[$parent_index];
+                    }
+                    $header->depth = 0;
+                    $header->parent_uid = null;
+                    $header->has_children = 1;
+                    $header->unread_children = 0;
+                    $header->flagged_children = 0;
+                    $sorted_by_thread[$parent_index]->depth = 1;
+                    $sorted_by_thread[$parent_index]->parent_uid = $header->uid;
+                    $sorted_by_thread[$parent_index]->has_children = 0;
+                    $sorted_by_thread[$parent_index]->unread_children = 0;
+                    $sorted_by_thread[$parent_index]->flagged_children = 0;
+                    foreach ($sorted_by_thread as $item) {
+                        if (!empty($item->parent_uid) && $item->parent_uid == $parent->uid) {
+                            $item->parent_uid = $header->uid;
+                        }
+                    }
+                    array_splice($sorted_by_thread, $parent_index, 0, [$header] ); 
+                } else {
+                    array_push($sorted_by_thread, $header);
+                }
+            }
+            $a_headers = $sorted_by_thread;
+        }
+        // END CONVERSATION VIEW
+
+
         // loop through message headers
         foreach ($a_headers as $header) {
             if (empty($header) || empty($header->size)) {
@@ -567,7 +616,7 @@ class rcmail_action_mail_index extends rcmail_action
             else if (!empty($header->has_children)) {
                 $roots[] = $header->uid;
             }
-            if (!empty($header->parent_uid)) {
+            if (!empty($header->parent_uid)) {#
                 $a_msg_flags['parent_uid'] = $header->parent_uid;
             }
             if (!empty($header->has_children)) {
